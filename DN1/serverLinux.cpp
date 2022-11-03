@@ -20,7 +20,7 @@
 Definiramo vrata (port) na katerem bo strežnik poslušal
 in velikost medponilnika za sprejemanje in pošiljanje podatkov
 */
-#define PORT 8015
+#define PORT 8018
 #define BUFFER_SIZE 256
 #define MAX_CONNECTIONS 2
 
@@ -99,6 +99,10 @@ int main(int argc, char **argv){
 			printf("Accept failed\n");
 			close(listener);
 			return 1;
+		} else if (CONNECTION_COUNT == MAX_CONNECTIONS) {
+			printf("[SERVER] Cannot accept more connections!\n");
+			close(clientSock);
+			continue;
 		}
 
 		// ko acceptas novo povezavo, ustvarti novo nit!
