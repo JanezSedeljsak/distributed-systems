@@ -20,11 +20,12 @@
 Definiramo vrata (port) na katerem bo strežnik poslušal
 in velikost medponilnika za sprejemanje in pošiljanje podatkov
 */
-#define PORT 8018
+#define PORT 8023
 #define BUFFER_SIZE 256
 #define MAX_CONNECTIONS 2
 
 int CONNECTION_COUNT;
+pthread_mutex_t LOCK;
 
 // deklariram strukturo za prenašanje argumentov v niti
 struct argumenti {
@@ -108,7 +109,11 @@ int main(int argc, char **argv){
 		// ko acceptas novo povezavo, ustvarti novo nit!
 		// takoj ko jo ustvarite, jo detach!!!
         args.clientSock = clientSock;
-		CONNECTION_COUNT++;
+
+		pthread_mutex_lock(&LOCK);
+    	CONNECTION_COUNT++;
+	    pthread_mutex_unlock(&LOCK);
+		
         // ustvari niti:
 		printf("[SERVER] New connection opened... We have: %d connections!\n", CONNECTION_COUNT);
         pthread_create( &nit,
@@ -158,7 +163,9 @@ void *funkcijaNiti (void* arg){
 		}
 		else if (iResult == 0) {
 			//printf("Connection closing...\n");
-			CONNECTION_COUNT--;
+			pthread_mutex_lock(&LOCK);
+    		CONNECTION_COUNT--;
+	    	pthread_mutex_unlock(&LOCK);
 			printf("[SERVER] Connection closing... We have: %d connections!\n", CONNECTION_COUNT);
 		} else {
 			printf("recv failed!\n");
