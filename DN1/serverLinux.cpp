@@ -13,18 +13,33 @@
 #include<sys/socket.h>
 #include<netinet/in.h>
 #include<unistd.h>
+
+#include <pthread.h>
+
 /*
 Definiramo vrata (port) na katerem bo strežnik poslušal
 in velikost medponilnika za sprejemanje in pošiljanje podatkov
 */
-#define PORT 1053
+#define PORT 8015
 #define BUFFER_SIZE 256
+#define MAX_CONNECTIONS 2
+
+int CONNECTION_COUNT;
+
+// deklariram strukturo za prenašanje argumentov v niti
+struct argumenti {
+	int clientSock;         // ID odjemalčevega vtiča
+};
+
+struct argumenti args;
+
+void *funkcijaNiti (void* arg);
 
 int main(int argc, char **argv){
-
+	CONNECTION_COUNT = 0;
+	printf("[SERVER] Sever listening on port: %d\n", PORT);
 	//Spremenjlivka za preverjane izhodnega statusa funkcij
 	int iResult;
-
 	/*
 	Ustvarimo nov vtiè, ki bo poslušal
 	in sprejemal nove kliente preko TCP/IP protokola
@@ -68,7 +83,8 @@ int main(int argc, char **argv){
 
 	//Definiramo nov vtiè in medpomnilik
 	int clientSock;
-	char buff[BUFFER_SIZE];
+
+    pthread_t nit;
 	
 	/*
 	V zanki sprejemamo nove povezave
@@ -85,38 +101,70 @@ int main(int argc, char **argv){
 			return 1;
 		}
 
-		//Postrezi povezanemu klientu
-		do{
+		// ko acceptas novo povezavo, ustvarti novo nit!
+		// takoj ko jo ustvarite, jo detach!!!
+        args.clientSock = clientSock;
+		CONNECTION_COUNT++;
+        // ustvari niti:
+		printf("[SERVER] New connection opened... We have: %d connections!\n", CONNECTION_COUNT);
+        pthread_create( &nit,
+                  NULL,
+                  funkcijaNiti,
+                  (void *) &args);
 
-			//Sprejmi podatke
-			iResult = recv(clientSock, buff, BUFFER_SIZE, 0);
-			if (iResult > 0) {
-				printf("Bytes received: %d\n", iResult);
 
-				//Vrni prejete podatke pošiljatelju
-				iResult = send(clientSock, buff, iResult, 0 );
-				if (iResult == -1) {
-					printf("send failed!\n");
-					close(clientSock);
-					break;
-				}
-				printf("Bytes sent: %d\n", iResult);
-			}
-			else if (iResult == 0)
-				printf("Connection closing...\n");
-			else{
-				printf("recv failed!\n");
-				close(clientSock);
-				break;
-			}
+        pthread_detach(nit);
 
-		} while (iResult > 0);
-
-		close(clientSock);
 	}
 
 	//Poèistimo vse vtièe
 	close(listener);
 
 	return 0;
+}
+
+
+void *funkcijaNiti (void* arg){
+    struct argumenti *args ;
+    args =  (struct argumenti *) arg;
+
+    int clientSock = args->clientSock;
+    int iResult;
+
+    char buff[BUFFER_SIZE];
+
+
+    // TOLE GRE V FUNKCIJO NITI, prenesi ji clientSock
+	// 
+	//Postrezi povezanemu klientu
+	do{
+		//Sprejmi podatke
+		iResult = recv(clientSock, buff, BUFFER_SIZE, 0);
+		if (iResult > 0) {
+			printf("Bytes received: %d\n", iResult);
+
+			//Vrni prejete podatke pošiljatelju
+			iResult = send(clientSock, buff, iResult, 0 );
+			if (iResult == -1) {
+				printf("send failed!\n");
+				close(clientSock);
+				break;
+			}
+			printf("Bytes sent: %d\n", iResult);
+		}
+		else if (iResult == 0) {
+			//printf("Connection closing...\n");
+			CONNECTION_COUNT--;
+			printf("[SERVER] Connection closing... We have: %d connections!\n", CONNECTION_COUNT);
+		} else {
+			printf("recv failed!\n");
+			close(clientSock);
+			break;
+		}
+
+	} while (iResult > 0);
+
+	close(clientSock);
+
+    pthread_exit(NULL);
 }
