@@ -11,7 +11,7 @@ int divisors[N + 1];
 
 /**
  * @brief 
- * Program is written so that first we build an array of diviors for each number, this way 
+ * Program is written so that first we build an array of divisors for each number, this way 
  * we get constant look up for each number when looping. In the main loop we use reduction
  * to sum up the "neighbour numbers" and in the end we print the elapsed time and result.
  * 
@@ -42,7 +42,7 @@ int main()
     for (int i = 0; i <= N; i++)
     {
         // get current divisor for example for 220 get 284
-        int current_divisor = divsiors_sum(i);
+        int current_divisor = divisors[i];
         if (i < current_divisor && current_divisor <= N && divisors[current_divisor] == i)
         {
             #ifdef PRINT
