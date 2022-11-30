@@ -32,6 +32,7 @@ int divisors[N + 1];
  * srun --reservation=fri -n1 --cpus-per-task=16 div.out
  * 
  * @result
+ * local - reduction ->        Sum of nums: 575875320, elapsed: 11.34
  * reduction ->                Sum of nums: 575875320, elapsed: 21.82
  * static ->                   Sum of nums: 575875320, elapsed: 22.61
  * static (8 chunksize) ->     Sum of nums: 575875320, elapsed: 21.79
