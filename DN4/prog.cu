@@ -3,12 +3,14 @@
 
 #include <cuda_runtime.h>
 #include <cuda.h>
+
 #include "helper_cuda.h"
+#include "stb_image.h"
+#include "stb_image_write.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image.h"
-#include "stb_image_write.h"
+
 
 #define COLOR_CHANNELS 4
 #define BLOCK_SIZE 16
