@@ -16,6 +16,7 @@
 #define DESIRED_NCHANNELS 1
 
 #define LOGGER
+#define NEW
 
 typedef unsigned long long ULL;
 typedef unsigned long UL;
@@ -27,52 +28,32 @@ typedef unsigned char UC;
  * srun --reservation=fri --gpus=1 ./histogram.out kolesar-neq.jpg kolesar-eq.jpg
  */
 
-__global__ void KERNEL_findMin_v1(const ULL *cdf, ULL *min_ptr)
+#ifndef NEW
+__global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if (cdf[x] > 0) 
-    {
-        ULL old = ULONG_LONG_MAX;
-        while (cdf[x] < old) {
-            old = atomicCAS(min_ptr, old, cdf[x]);
-        }
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (y < height && x < width) {
+        int hist_index = image[y * width + x];
+        atomicAdd(histogram + hist_index, 1);
     }
 }
+#endif
 
-__global__ void KERNEL_findMin_v2(const ULL *cdf, ULL *min_ptr)
-{
-    __shared__ ULL shared[256];
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    shared[threadIdx.x] = cdf[x] > 0 ? cdf[x] : ULONG_LONG_MAX;
-    __syncthreads();
-
-    for (int i = blockDim.x / 2; i > 0; i /= 2)
-    {
-        if (threadIdx.x < i && shared[threadIdx.x] > shared[threadIdx.x + i])
-            shared[threadIdx.x] = shared[threadIdx.x + i];
-        
-        __syncthreads();
-    }
-
-    if (threadIdx.x == 0)
-    {
-        ULL old = ULONG_LONG_MAX;
-        while (shared[0] < old)
-        {
-            old = atomicCAS(min_ptr, old, shared[0]);
-        }
-    }
-}
-
+#ifdef NEW
 // TODO: Add shared memory
 __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    int hist_index = image[y * width + x];
-    atomicAdd(histogram + hist_index, 1);
+    if (y < height && x < width) {
+        int hist_index = image[y * width + x];
+        atomicAdd(histogram + hist_index, 1);
+    }
 }
+#endif
 
 // TODO: improve this
 __global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
@@ -88,6 +69,46 @@ __global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
     cdf[x] = sum;
 }
 
+#ifndef NEW
+__global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (cdf[x] > 0) 
+    {
+        ULL prev = ULONG_LONG_MAX;
+        while (cdf[x] < prev) {
+            prev = atomicCAS(min_ptr, prev, cdf[x]);
+        }
+    }
+}
+#endif
+
+#ifdef NEW
+__global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
+{
+    __shared__ ULL shared[GRAYLEVELS];
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    shared[threadIdx.x] = cdf[x] > 0 ? cdf[x] : ULONG_LONG_MAX;
+    __syncthreads();
+
+    for (int i = blockDim.x / 2; i > 0; i /= 2)
+    {
+        if (threadIdx.x < i && shared[threadIdx.x] > shared[threadIdx.x + i])
+            shared[threadIdx.x] = shared[threadIdx.x + i];
+        
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0)
+    {
+        ULL prev = ULONG_LONG_MAX;
+        while (shared[0] < prev)
+            prev = atomicCAS(min_ptr, prev, shared[0]);
+        
+    }
+}
+#endif
+
 __device__ inline UC scale(UL cdf, UL cdfmin, UL imageSize)
 {
     float scale = (float)(cdf - cdfmin) / (float)(imageSize - cdfmin);
@@ -100,7 +121,9 @@ __global__ void KERNEL_Equalize(const UC *image_in, UC *image_out, const int wid
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     const UL imageSize = width * height;
 
-    image_out[y * width + x] = scale(cdf[image_in[y * width + x]], *cdfmin, imageSize);
+    if (y < height && x < width) {
+        image_out[y * width + x] = scale(cdf[image_in[y * width + x]], *cdfmin, imageSize);
+    }
 }
 
 int main(int argc, char **argv)
@@ -167,7 +190,7 @@ int main(int argc, char **argv)
     // 3. Calculate the new gray-level values through the general histogram equalization formula and assign new pixel values
     dim3 blockSizeMin(GRAYLEVELS);
     dim3 gridSizeMin((GRAYLEVELS + blockSizeMin.x - 1) / blockSizeMin.x);
-    KERNEL_findMin_v2<<<gridSizeMin, blockSizeMin>>>(d_cdf, d_cdfmin);
+    KERNEL_findMin<<<gridSizeMin, blockSizeMin>>>(d_cdf, d_cdfmin);
 
     #ifdef LOGGER
         checkCudaErrors(cudaMemcpy(&max_value, d_cdfmin, ull_size, cudaMemcpyDeviceToHost));
@@ -180,8 +203,8 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaMemcpy(imageOut, d_imageOut, img_size, cudaMemcpyDeviceToHost));
 
     // Create output image:
-    // stbi_write_png("out.png", width, height, DESIRED_NCHANNELS, imageOut, width * DESIRED_NCHANNELS);
     stbi_write_jpg(argv[2], width, height, DESIRED_NCHANNELS, imageOut, 100);
+    // stbi_write_png("out.png", width, height, DESIRED_NCHANNELS, imageOut, width * DESIRED_NCHANNELS);
 
     // Free CUDA memory
     checkCudaErrors(cudaFree(d_imageIn));
