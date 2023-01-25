@@ -1,14 +1,23 @@
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image.h"
 #include "stb_image_write.h"
 
 #define COLOR_CHANNELS 1
-
 #define GRAYLEVELS 256
 #define DESIRED_NCHANNELS 1
+
+//#define LOGGER
+#define PERF
+
+/**
+ * gcc histogram.c -lm -o histogram_cpu.out 
+ * srun --reservation=fri -n1 --cpus-per-task=1 ./histogram_cpu.out images/500.jpg out/500.jpg
+ */
 
 unsigned long findMin(unsigned long* cdf){
     
@@ -78,23 +87,36 @@ void Equalize(unsigned char * image_in, unsigned char * image_out, int width, in
 
 
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc < 3)
+    {
+        printf("Error: Missing 2 image params\n");
+        exit(EXIT_FAILURE);
+    }
+
 	// Read image from file
     int width, height, cpp;
     // read only DESIRED_NCHANNELS channels from the input image:
-    unsigned char *imageIn = stbi_load("kolesar-neq.jpg", &width, &height, &cpp, DESIRED_NCHANNELS);
+    unsigned char *imageIn = stbi_load(argv[1], &width, &height, &cpp, DESIRED_NCHANNELS);
     if(imageIn == NULL) {
         printf("Error in loading the image\n");
         return 1;
     }
-    printf("Loaded image W= %d, H = %d, actual cpp = %d \n", width, height, cpp);
+
+    #ifdef LOGGER
+        printf("Loaded image W= %d, H = %d, actual cpp = %d \n", width, height, cpp);
+    #endif
     
 
 	//Allocate memory for raw output image data, histogram, and CDF 
 	unsigned char *imageOut = (unsigned char *)malloc(height * width * sizeof(unsigned long));
     unsigned long *histogram= (unsigned long *)malloc(GRAYLEVELS * sizeof(unsigned long));
     unsigned long *CDF= (unsigned long *)malloc(GRAYLEVELS * sizeof(unsigned long));
+
+    clock_t start, end;
+
+    start = clock();
 
 	// Histogram equalization steps: 
 	// 1. Create the histogram for the input grayscale image.
@@ -105,9 +127,16 @@ int main(void)
 	//    and assign new pixel values
 	Equalize(imageIn, imageOut, width, height, CDF);
 
+    end = clock();
+
+    #ifdef PERF
+        double milliseconds = 1000.0 * (end - start) / CLOCKS_PER_SEC;
+        printf("%0.3f\n", milliseconds);
+    #endif
+
     // write output image:
-    stbi_write_png("out.png", width, height, DESIRED_NCHANNELS, imageOut, width * DESIRED_NCHANNELS);
-    stbi_write_jpg("out.jpg", width, height, DESIRED_NCHANNELS, imageOut, 100);
+    //stbi_write_png("out.png", width, height, DESIRED_NCHANNELS, imageOut, width * DESIRED_NCHANNELS);
+    stbi_write_jpg(argv[2], width, height, DESIRED_NCHANNELS, imageOut, 100);
 
 	//Free memory
 	free(imageIn);

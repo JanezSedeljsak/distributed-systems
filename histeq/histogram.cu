@@ -15,7 +15,8 @@
 #define GRAYLEVELS 256
 #define DESIRED_NCHANNELS 1
 
-#define LOGGER
+//#define LOGGER
+#define PERF
 #define NEW
 
 typedef unsigned long long ULL;
@@ -25,7 +26,7 @@ typedef unsigned char UC;
 /**
  * module load CUDA/10.1.243-GCC-8.3.0
  * nvcc -o histogram.out histogram.cu
- * srun --reservation=fri --gpus=1 ./histogram.out kolesar-neq.jpg kolesar-eq.jpg
+ * srun --reservation=fri --gpus=1 ./histogram.out images/500.jpg out/500.jpg
  */
 
 #ifndef NEW
@@ -144,7 +145,10 @@ int main(int argc, char **argv)
         printf("Error: loading image\n");
         return 1;
     }
-    printf("Loaded image W= %d, H = %d, actual cpp = %d \n", width, height, cpp);
+
+    #ifdef LOGGER
+        printf("Loaded image W= %d, H = %d, actual cpp = %d \n", width, height, cpp);
+    #endif
 
     const size_t img_size = width * height * sizeof(UC);
     const size_t hist_size = GRAYLEVELS * sizeof(ULL);
@@ -179,7 +183,13 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaMemset(d_cdf, 0, hist_size));
     checkCudaErrors(cudaMemcpy(d_cdfmin, &max_value, ull_size, cudaMemcpyHostToDevice));
 
+    // Create CUDA events
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     // Histogram equalization steps:
+    cudaEventRecord(start);
 
     // 1. Create the histogram for the input grayscale image.
     KERNEL_CalculateHistogram<<<gridSize, blockSize>>>(d_imageIn, width, height, d_histogram);
@@ -195,12 +205,22 @@ int main(int argc, char **argv)
     #ifdef LOGGER
         checkCudaErrors(cudaMemcpy(&max_value, d_cdfmin, ull_size, cudaMemcpyDeviceToHost));
         printf("First greater than 0: %llu\n", max_value);
-    #endif 
+    #endif
 
     KERNEL_Equalize<<<gridSize, blockSize>>>(d_imageIn, d_imageOut, width, height, d_cdf, d_cdfmin);
+    cudaEventRecord(stop);
 
     // Copy data CUDA -> CPU
     checkCudaErrors(cudaMemcpy(imageOut, d_imageOut, img_size, cudaMemcpyDeviceToHost));
+
+    // Wait for the event to finish
+    cudaEventSynchronize(stop);
+
+    #ifdef PERF
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        printf("%0.3f\n", milliseconds);
+    #endif
 
     // Create output image:
     stbi_write_jpg(argv[2], width, height, DESIRED_NCHANNELS, imageOut, 100);
@@ -212,6 +232,10 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaFree(d_histogram));
     checkCudaErrors(cudaFree(d_cdf));
     checkCudaErrors(cudaFree(d_cdfmin));
+
+    // Clean up the two events
+	cudaEventDestroy(start);
+	cudaEventDestroy(stop);
 
     // Free memory
     free(imageIn);

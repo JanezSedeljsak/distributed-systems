@@ -39,9 +39,33 @@ class HistEqualization:
         plt.show()
 
 
-# Read image
-image = pimg.open("C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\kolesar-neq.jpg")
+def draw_hist_and_commulative(subfolder, image)
+    # Read image
+    image = pimg.open(f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\{subfolder}\\{image}.jpg")
 
-# Create histogram
-HistEqualization.histogram(image)
-HistEqualization.commulative(image, 256)
+    # Create histogram
+    HistEqualization.histogram(image)
+    HistEqualization.commulative(image, 256)
+
+def analysis():
+    data = [
+        ("500",         500 ** 2)
+        ("640",         640 ** 2)
+        ("800",         800 ** 2)
+        ("1000",        1000 ** 2)
+        ("1024_640",    1024 * 640)
+        ("1200",        1200 * 2)
+        ("1680_1050",   1680 * 1050)
+        ("1920_1080",   1920 * 1080)
+        ("2560_1080",   2560 * 1080)
+        ("2560_1440",   2560 * 1440)
+        ("4k",          3840 * 2160)
+        ("4kp",         4056 * 3040)
+    ]
+
+    names = [name for name, _ in data]
+    resolutions = [res for _, res in data]
+
+
+#draw_hist_and_commulative('out_cpu', '500')
+#analysis
