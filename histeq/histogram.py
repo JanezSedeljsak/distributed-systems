@@ -28,6 +28,7 @@ class HistEqualization:
         plt.hist(vals, bins=256, range=(0, 255), color='blue', histtype='bar', rwidth=0.8)
         plt.title('Histogram')
         plt.show()
+        #plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\{"4kp"}o.jpg')
 
     @staticmethod
     def commulative(pic, brightness_range):
@@ -37,6 +38,7 @@ class HistEqualization:
         plt.scatter(np.arange(0, brightness_range), comm, s=3)
         plt.title('Commulative')
         plt.show()
+        #plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\{"4kp"}o2.jpg')
 
 
 def draw_hist_and_commulative(subfolder, image)
