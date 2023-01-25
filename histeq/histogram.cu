@@ -21,50 +21,20 @@
  * srun --reservation=fri --gpus=1 ./histogram.out kolesar-neq.jpg
  */
 
-unsigned long findMin(unsigned long long *cdf)
+// TODO: add reduction and get actual min value of cdf array and store it into min_ptr
+__global__ void KERNEL_findMin(unsigned long long *cdf, unsigned long long *min_ptr)
 {
-
-    unsigned long min = 0;
-    for (int i = 0; min == 0 && i < GRAYLEVELS; i++)
-    {
-        min = cdf[i];
-    }
-
-    return min;
+    *min_ptr = 29;
 }
 
-__global__ void KERNEL_findMin(unsigned long long *cdf, unsigned long *min_ptr)
-{
-    int block = blockIdx.x;
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-
-    unsigned long current = cdf[x];
-    if (x == 0 && block == 0)
-    {
-        *min_ptr = current;
-    }
-
-    __syncthreads();
-    for (int i = 1; i < blockDim.x * gridDim.x; i++)
-    {
-        if (x + i < GRAYLEVELS)
-        {
-            current = cdf[x + i] < current ? cdf[x + i] : current;
-            if (current == cdf[x + i])
-            {
-                *min_ptr = current;
-            }
-        }
-        __syncthreads();
-    }
-}
-
+// OK
 __device__ inline unsigned char scale(unsigned long cdf, unsigned long cdfmin, unsigned long imageSize)
 {
     float scale = (float)(cdf - cdfmin) / (float)(imageSize - cdfmin);
     return (int)round(scale * (float)(GRAYLEVELS - 1));
 }
 
+// TODO: Add shared memory
 __global__ void KERNEL_CalculateHistogram(const unsigned char *image, const int width, const int height, unsigned long long *histogram)
 {
     // Get pixel
@@ -75,6 +45,7 @@ __global__ void KERNEL_CalculateHistogram(const unsigned char *image, const int 
     atomicAdd(histogram + hist_index, 1);
 }
 
+// TODO: improve this
 __global__ void KERNEL_CalculateCDF(unsigned long long *histogram, unsigned long long *cdf)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -88,13 +59,14 @@ __global__ void KERNEL_CalculateCDF(unsigned long long *histogram, unsigned long
     cdf[x] = sum;
 }
 
-__global__ void KERNEL_Equalize(const unsigned char *image_in, unsigned char *image_out, const int width, const int height, const unsigned long long *cdf, const unsigned long cdfmin)
+// OK
+__global__ void KERNEL_Equalize(const unsigned char *image_in, unsigned char *image_out, const int width, const int height, const unsigned long long *cdf, const unsigned long long *cdfmin)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     const unsigned long imageSize = width * height;
 
-    image_out[y * width + x] = scale(cdf[image_in[y * width + x]], cdfmin, imageSize);
+    image_out[y * width + x] = scale(cdf[image_in[y * width + x]], *cdfmin, imageSize);
 }
 
 int main(int argc, char **argv)
@@ -120,9 +92,8 @@ int main(int argc, char **argv)
     const size_t img_size = width * height * sizeof(unsigned char);
     const size_t hist_size = GRAYLEVELS * sizeof(unsigned long long);
 
-    // Allocate memory for raw output image data, histogram, and CDF
+    // Allocate memory for raw output image data
     unsigned char *imageOut = (unsigned char *)malloc(img_size);
-    unsigned long long *CDF = (unsigned long long *)malloc(hist_size);
 
     // Allocate memory for cuda
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
@@ -135,11 +106,13 @@ int main(int argc, char **argv)
     unsigned char *d_imageOut;
     unsigned long long *d_histogram;
     unsigned long long *d_cdf;
+    unsigned long long *d_cdfmin;
 
     checkCudaErrors(cudaMalloc(&d_imageIn, img_size));
     checkCudaErrors(cudaMalloc(&d_imageOut, img_size));
     checkCudaErrors(cudaMalloc(&d_histogram, hist_size));
     checkCudaErrors(cudaMalloc(&d_cdf, hist_size));
+    checkCudaErrors(cudaMalloc(&d_cdfmin, sizeof(unsigned long long)));
 
     // Copy image CPU -> CUDA and set every cell in histogram and cdf to 0
     checkCudaErrors(cudaMemcpy(d_imageIn, imageIn, img_size, cudaMemcpyHostToDevice));
@@ -153,15 +126,10 @@ int main(int argc, char **argv)
 
     // 2. Calculate the cumulative distribution histogram.
     KERNEL_CalculateCDF<<<gridSizeHist, blockSizeHist>>>(d_histogram, d_cdf);
-    
 
-    // 3. Calculate the new gray-level values through the general histogram equalization formula
-    //    and assign new pixel values
-    checkCudaErrors(cudaMemcpy(CDF, d_cdf, hist_size, cudaMemcpyDeviceToHost));
-    unsigned long cdfmin = findMin(CDF);
-    // unsigned long cdfmin;
-    // KERNEL_findMin<<<gridSize, blockSize>>>(d_cdf, &cdfmin);
-    KERNEL_Equalize<<<gridSize, blockSize>>>(d_imageIn, d_imageOut, width, height, d_cdf, cdfmin);
+    // 3. Calculate the new gray-level values through the general histogram equalization formula and assign new pixel values
+    KERNEL_findMin<<<blockSizeHist, gridSizeHist>>>(d_cdf, d_cdfmin);
+    KERNEL_Equalize<<<gridSize, blockSize>>>(d_imageIn, d_imageOut, width, height, d_cdf, d_cdfmin);
 
     // Copy data CUDA -> CPU
     checkCudaErrors(cudaMemcpy(imageOut, d_imageOut, img_size, cudaMemcpyDeviceToHost));
@@ -175,11 +143,11 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaFree(d_imageOut));
     checkCudaErrors(cudaFree(d_histogram));
     checkCudaErrors(cudaFree(d_cdf));
+    checkCudaErrors(cudaFree(d_cdfmin));
 
     // Free memory
     free(imageIn);
     free(imageOut);
-    free(CDF);
 
     return 0;
 }
