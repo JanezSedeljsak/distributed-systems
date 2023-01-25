@@ -8,7 +8,8 @@ class HistEqualization:
     @staticmethod
     def get_brightness_values(pic):
         width, height = pic.size
-        return [pic.getpixel((x, y)) for x in range(width) for y in range(height)]
+        pic = pic.convert("RGB")
+        return [sum(list(pic.getpixel((x, y))))//3 for x in range(width) for y in range(height)]
 
     @staticmethod
     def calc_commulative_vals(values, brange):
