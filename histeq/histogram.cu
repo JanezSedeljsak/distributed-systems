@@ -1,43 +1,72 @@
 #include <stdlib.h>
 #include <math.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image.h"
 #include "stb_image_write.h"
+
 #include <cuda_runtime.h>
 #include <cuda.h>
-
 #include "helper_cuda.h"
 
 #define COLOR_CHANNELS 1
 #define BLOCK_SIZE 16
-
 #define GRAYLEVELS 256
 #define DESIRED_NCHANNELS 1
+
+#define LOGGER
+
+typedef unsigned long long ULL;
+typedef unsigned long UL;
+typedef unsigned char UC;
 
 /**
  * module load CUDA/10.1.243-GCC-8.3.0
  * nvcc -o histogram.out histogram.cu
- * srun --reservation=fri --gpus=1 ./histogram.out kolesar-neq.jpg
+ * srun --reservation=fri --gpus=1 ./histogram.out kolesar-neq.jpg kolesar-eq.jpg
  */
 
-// TODO: add reduction and get actual min value of cdf array and store it into min_ptr
-__global__ void KERNEL_findMin(unsigned long long *cdf, unsigned long long *min_ptr)
+__global__ void KERNEL_findMin_v1(const ULL *cdf, ULL *min_ptr)
 {
-    *min_ptr = 29;
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (cdf[x] > 0) 
+    {
+        ULL old = ULONG_LONG_MAX;
+        while (cdf[x] < old) {
+            old = atomicCAS(min_ptr, old, cdf[x]);
+        }
+    }
 }
 
-// OK
-__device__ inline unsigned char scale(unsigned long cdf, unsigned long cdfmin, unsigned long imageSize)
+__global__ void KERNEL_findMin_v2(const ULL *cdf, ULL *min_ptr)
 {
-    float scale = (float)(cdf - cdfmin) / (float)(imageSize - cdfmin);
-    return (int)round(scale * (float)(GRAYLEVELS - 1));
+    __shared__ ULL shared[256];
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    shared[threadIdx.x] = cdf[x] > 0 ? cdf[x] : ULONG_LONG_MAX;
+    __syncthreads();
+
+    for (int i = blockDim.x / 2; i > 0; i /= 2)
+    {
+        if (threadIdx.x < i && shared[threadIdx.x] > shared[threadIdx.x + i])
+            shared[threadIdx.x] = shared[threadIdx.x + i];
+        
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0)
+    {
+        ULL old = ULONG_LONG_MAX;
+        while (shared[0] < old)
+        {
+            old = atomicCAS(min_ptr, old, shared[0]);
+        }
+    }
 }
 
 // TODO: Add shared memory
-__global__ void KERNEL_CalculateHistogram(const unsigned char *image, const int width, const int height, unsigned long long *histogram)
+__global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
 {
-    // Get pixel
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -46,10 +75,10 @@ __global__ void KERNEL_CalculateHistogram(const unsigned char *image, const int 
 }
 
 // TODO: improve this
-__global__ void KERNEL_CalculateCDF(unsigned long long *histogram, unsigned long long *cdf)
+__global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned long long sum = 0;
+    ULL sum = 0;
 
     for (int i = 0; i <= x; i++)
     {
@@ -59,12 +88,17 @@ __global__ void KERNEL_CalculateCDF(unsigned long long *histogram, unsigned long
     cdf[x] = sum;
 }
 
-// OK
-__global__ void KERNEL_Equalize(const unsigned char *image_in, unsigned char *image_out, const int width, const int height, const unsigned long long *cdf, const unsigned long long *cdfmin)
+__device__ inline UC scale(UL cdf, UL cdfmin, UL imageSize)
+{
+    float scale = (float)(cdf - cdfmin) / (float)(imageSize - cdfmin);
+    return (int)round(scale * (float)(GRAYLEVELS - 1));
+}
+
+__global__ void KERNEL_Equalize(const UC *image_in, UC *image_out, const int width, const int height, const ULL *cdf, const ULL *cdfmin)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const unsigned long imageSize = width * height;
+    const UL imageSize = width * height;
 
     image_out[y * width + x] = scale(cdf[image_in[y * width + x]], *cdfmin, imageSize);
 }
@@ -81,7 +115,7 @@ int main(int argc, char **argv)
     int width, height, cpp;
 
     // read only DESIRED_NCHANNELS channels from the input image:
-    unsigned char *imageIn = stbi_load(argv[1], &width, &height, &cpp, DESIRED_NCHANNELS);
+    UC *imageIn = stbi_load(argv[1], &width, &height, &cpp, DESIRED_NCHANNELS);
     if (imageIn == NULL)
     {
         printf("Error: loading image\n");
@@ -89,11 +123,12 @@ int main(int argc, char **argv)
     }
     printf("Loaded image W= %d, H = %d, actual cpp = %d \n", width, height, cpp);
 
-    const size_t img_size = width * height * sizeof(unsigned char);
-    const size_t hist_size = GRAYLEVELS * sizeof(unsigned long long);
+    const size_t img_size = width * height * sizeof(UC);
+    const size_t hist_size = GRAYLEVELS * sizeof(ULL);
+    const size_t ull_size = sizeof(ULL);
 
     // Allocate memory for raw output image data
-    unsigned char *imageOut = (unsigned char *)malloc(img_size);
+    UC *imageOut = (UC *)malloc(img_size);
 
     // Allocate memory for cuda
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
@@ -102,22 +137,24 @@ int main(int argc, char **argv)
     dim3 blockSizeHist(1);
     dim3 gridSizeHist(GRAYLEVELS);
 
-    unsigned char *d_imageIn;
-    unsigned char *d_imageOut;
-    unsigned long long *d_histogram;
-    unsigned long long *d_cdf;
-    unsigned long long *d_cdfmin;
+    UC *d_imageIn;
+    UC *d_imageOut;
+    ULL *d_histogram;
+    ULL *d_cdf;
+    ULL *d_cdfmin;
+    ULL max_value = ULONG_LONG_MAX;
 
     checkCudaErrors(cudaMalloc(&d_imageIn, img_size));
     checkCudaErrors(cudaMalloc(&d_imageOut, img_size));
     checkCudaErrors(cudaMalloc(&d_histogram, hist_size));
     checkCudaErrors(cudaMalloc(&d_cdf, hist_size));
-    checkCudaErrors(cudaMalloc(&d_cdfmin, sizeof(unsigned long long)));
+    checkCudaErrors(cudaMalloc(&d_cdfmin, ull_size));
 
     // Copy image CPU -> CUDA and set every cell in histogram and cdf to 0
     checkCudaErrors(cudaMemcpy(d_imageIn, imageIn, img_size, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemset(d_histogram, 0, hist_size));
     checkCudaErrors(cudaMemset(d_cdf, 0, hist_size));
+    checkCudaErrors(cudaMemcpy(d_cdfmin, &max_value, ull_size, cudaMemcpyHostToDevice));
 
     // Histogram equalization steps:
 
@@ -128,7 +165,15 @@ int main(int argc, char **argv)
     KERNEL_CalculateCDF<<<gridSizeHist, blockSizeHist>>>(d_histogram, d_cdf);
 
     // 3. Calculate the new gray-level values through the general histogram equalization formula and assign new pixel values
-    KERNEL_findMin<<<blockSizeHist, gridSizeHist>>>(d_cdf, d_cdfmin);
+    dim3 blockSizeMin(GRAYLEVELS);
+    dim3 gridSizeMin((GRAYLEVELS + blockSizeMin.x - 1) / blockSizeMin.x);
+    KERNEL_findMin_v2<<<gridSizeMin, blockSizeMin>>>(d_cdf, d_cdfmin);
+
+    #ifdef LOGGER
+        checkCudaErrors(cudaMemcpy(&max_value, d_cdfmin, ull_size, cudaMemcpyDeviceToHost));
+        printf("First greater than 0: %llu\n", max_value);
+    #endif 
+
     KERNEL_Equalize<<<gridSize, blockSize>>>(d_imageIn, d_imageOut, width, height, d_cdf, d_cdfmin);
 
     // Copy data CUDA -> CPU
