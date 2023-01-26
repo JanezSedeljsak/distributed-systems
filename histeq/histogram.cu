@@ -35,7 +35,8 @@ __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, cons
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (y < height && x < width) {
+    if (y < height && x < width) 
+    {
         int hist_index = image[y * width + x];
         atomicAdd(histogram + hist_index, 1);
     }
@@ -49,7 +50,8 @@ __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, cons
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (y < height && x < width) {
+    if (y < height && x < width) 
+    {
         int hist_index = image[y * width + x];
         atomicAdd(histogram + hist_index, 1);
     }

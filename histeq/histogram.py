@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from PIL import Image as pimg
 import numpy as np
-
+from math import log
 
 class HistEqualization:
 
@@ -9,7 +9,7 @@ class HistEqualization:
     def get_brightness_values(pic):
         width, height = pic.size
         pic = pic.convert("RGB")
-        return [sum(list(pic.getpixel((x, y))))//3 for x in range(width) for y in range(height)]
+        return [sum(list(pic.getpixel((x, y)))) // 3 for x in range(width) for y in range(height)]
 
     @staticmethod
     def calc_commulative_vals(values, brange):
@@ -23,51 +23,125 @@ class HistEqualization:
         return commulative
 
     @staticmethod
-    def histogram(pic):
+    def histogram(pic, name):
+        plt.clf()
         vals = HistEqualization.get_brightness_values(pic)
         plt.hist(vals, bins=256, range=(0, 255), color='blue', histtype='bar', rwidth=0.8)
         plt.title('Histogram')
-        plt.show()
-        #plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\{"4kp"}o.jpg')
+        # plt.show()
+        plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\results\\{name}o.jpg')
 
     @staticmethod
-    def commulative(pic, brightness_range):
+    def commulative(pic, brightness_range, name):
+        plt.clf()
         vals = HistEqualization.get_brightness_values(pic)
         comm = HistEqualization.calc_commulative_vals(vals, brightness_range)
 
         plt.scatter(np.arange(0, brightness_range), comm, s=3)
         plt.title('Commulative')
+        # plt.show()
+        plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\results\\{name}o2.jpg')
+
+    @staticmethod
+    def calc_avg(filename):
+        total, count = 0, 0
+
+        with open(filename, 'r') as f:
+            for line in f:
+                try:
+                    total += float(line)
+                    count += 1
+                except ValueError:
+                    pass
+
+        return total / count if count > 0 else 0
+
+    @staticmethod
+    def make_graphs():
+        for img in ("500", "640", "800", "1000", "1024_640", "1200", "1680_1050", "1920_1080", "2560_1080", "2560_1440", "4k", "4kp"):
+            # Read image
+            image = pimg.open(f"C:\\Users\\janezs\\Desktop\\vpsa\\results\\{img}.jpg")
+
+            # Create histogram
+            HistEqualization.histogram(image, img)
+            HistEqualization.commulative(image, 256, img)
+
+
+    @staticmethod
+    def analysis():
+        data = [
+            ("500", 500 ** 2),
+            ("640", 640 ** 2),
+            ("800", 800 ** 2),
+            ("1000", 1000 ** 2),
+            ("1024_640", 1024 * 640),
+            ("1200", 1200 ** 2),
+            ("1680_1050", 1680 * 1050),
+            ("1920_1080", 1920 * 1080),
+            ("2560_1080", 2560 * 1080),
+            ("2560_1440", 2560 * 1440),
+            ("4k", 3840 * 2160),
+            ("4kp", 4056 * 3040)
+        ]
+
+        names = [name for name, _ in data]
+        resolutions = [res for _, res in data]
+        cpu_avgs = [HistEqualization.calc_avg(f"C:\\Users\\janezs\\Desktop\\vpsa\\times\\cpu\\{name}.txt") for name in names]
+        cuda_avgs = [HistEqualization.calc_avg(f"C:\\Users\\janezs\\Desktop\\vpsa\\times\\cuda\\{name}.txt") for name in names]
+
+        cpu_avgs_log = [log(val, 2) for val in cpu_avgs]
+        cuda_avgs_log = [log(val, 2) for val in cuda_avgs]
+
+        cpu_avgs_normalized = [val/resolutions[i] for i, val in enumerate(cpu_avgs)]
+        cuda_avgs_normalized = [val/resolutions[i] for i, val in enumerate(cuda_avgs)]
+
+        cpu_avgs_normalized_log = [log(val, 2) for val in cpu_avgs_normalized]
+        cuda_avgs_normalized_log = [log(val, 2) for val in cuda_avgs_normalized]
+        plt.rcParams["figure.figsize"] = (13, 7)
+
+        # first basic analysis
+        plt.clf()
+        plt.plot(names, cpu_avgs, label='CPU')
+        plt.plot(names, cuda_avgs, label='CUDA')
+        plt.xlabel('Images')
+        plt.ylabel('Performance')
+        plt.title('Performance comparison')
+        plt.xticks(rotation=20)
+        plt.legend()
         plt.show()
-        #plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\{"4kp"}o2.jpg')
 
+        # basic analysis with log applied
+        plt.clf()
+        plt.plot(names, cpu_avgs_log, label='CPU')
+        plt.plot(names, cuda_avgs_log, label='CUDA')
+        plt.xlabel('Images')
+        plt.ylabel('Performance - with log')
+        plt.title('Performance comparison - with log (normalized)')
+        plt.xticks(rotation=20)
+        plt.legend()
+        plt.show()
 
-def draw_hist_and_commulative(subfolder, image)
-    # Read image
-    image = pimg.open(f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\{subfolder}\\{image}.jpg")
+        # normalized analysis
+        plt.clf()
+        plt.plot(names, cpu_avgs_normalized, label='CPU')
+        plt.plot(names, cuda_avgs_normalized, label='CUDA')
+        plt.xlabel('Images')
+        plt.ylabel('Performance')
+        plt.title('Performance comparison - based on amount of pixels')
+        plt.xticks(rotation=20)
+        plt.legend()
+        plt.show()
 
-    # Create histogram
-    HistEqualization.histogram(image)
-    HistEqualization.commulative(image, 256)
+        # normalized analysis with log applied
+        plt.clf()
+        plt.plot(names, cpu_avgs_normalized_log, label='CPU')
+        plt.plot(names, cuda_avgs_normalized_log, label='CUDA')
+        plt.xlabel('Images')
+        plt.ylabel('Performance')
+        plt.title('Performance comparison - based on amount of pixels')
+        plt.xticks(rotation=20)
+        plt.legend()
+        plt.show()
 
-def analysis():
-    data = [
-        ("500",         500 ** 2)
-        ("640",         640 ** 2)
-        ("800",         800 ** 2)
-        ("1000",        1000 ** 2)
-        ("1024_640",    1024 * 640)
-        ("1200",        1200 * 2)
-        ("1680_1050",   1680 * 1050)
-        ("1920_1080",   1920 * 1080)
-        ("2560_1080",   2560 * 1080)
-        ("2560_1440",   2560 * 1440)
-        ("4k",          3840 * 2160)
-        ("4kp",         4056 * 3040)
-    ]
+HistEqualization.analysis()
 
-    names = [name for name, _ in data]
-    resolutions = [res for _, res in data]
-
-
-#draw_hist_and_commulative('out_cpu', '500')
-#analysis
