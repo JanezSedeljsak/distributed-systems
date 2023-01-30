@@ -15,9 +15,9 @@
 #define GRAYLEVELS 256
 #define DESIRED_NCHANNELS 1
 
-//#define LOGGER
+// #define LOGGER
 #define PERF
-#define NEW
+#define OPTIMIZED
 
 typedef unsigned long long ULL;
 typedef unsigned long UL;
@@ -29,42 +29,26 @@ typedef unsigned char UC;
  * srun --reservation=fri --gpus=1 ./histogram.out images/500.jpg out/500.jpg
  */
 
-#ifndef NEW
+#ifndef OPTIMIZED
+
 __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (y < height && x < width) 
+    if (y < height && x < width)
     {
         int hist_index = image[y * width + x];
         atomicAdd(histogram + hist_index, 1);
     }
 }
-#endif
 
-#ifdef NEW
-// TODO: Add shared memory
-__global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
-{
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (y < height && x < width) 
-    {
-        int hist_index = image[y * width + x];
-        atomicAdd(histogram + hist_index, 1);
-    }
-}
-#endif
-
-// TODO: improve this
 __global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
 {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int x = blockIdx.x * blockDim.x + threadIdx.x, i;
     ULL sum = 0;
 
-    for (int i = 0; i <= x; i++)
+    for (i = 0; i <= x; ++i)
     {
         sum += histogram[i];
     }
@@ -72,44 +56,68 @@ __global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
     cdf[x] = sum;
 }
 
-#ifndef NEW
 __global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if (cdf[x] > 0) 
+    if (cdf[x] > 0)
     {
         ULL prev = ULONG_LONG_MAX;
-        while (cdf[x] < prev) {
+        while (cdf[x] < prev)
+        {
             prev = atomicCAS(min_ptr, prev, cdf[x]);
         }
     }
 }
-#endif
 
-#ifdef NEW
+#else
+
+__global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (y < height && x < width)
+    {
+        int hist_index = image[y * width + x];
+        atomicAdd(histogram + hist_index, 1);
+    }
+}
+
+__global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x, i;
+    cdf[x] = histogram[x];
+
+    for (i = 1; i < GRAYLEVELS; i *= 2)
+    {
+        if (threadIdx.x >= i)
+            cdf[threadIdx.x] += cdf[threadIdx.x - i];
+    }
+}
+
 __global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
 {
     __shared__ ULL shared[GRAYLEVELS];
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int x = blockIdx.x * blockDim.x + threadIdx.x, i;
     shared[threadIdx.x] = cdf[x] > 0 ? cdf[x] : ULONG_LONG_MAX;
     __syncthreads();
 
-    for (int i = blockDim.x / 2; i > 0; i /= 2)
+    for (i = blockDim.x / 2; i > 0; i /= 2)
     {
         if (threadIdx.x < i && shared[threadIdx.x] > shared[threadIdx.x + i])
             shared[threadIdx.x] = shared[threadIdx.x + i];
-        
+
         __syncthreads();
     }
 
     if (threadIdx.x == 0)
     {
         ULL prev = ULONG_LONG_MAX;
-        while (shared[0] < prev)
-            prev = atomicCAS(min_ptr, prev, shared[0]);
-        
+        while (*shared < prev)
+            prev = atomicCAS(min_ptr, prev, *shared);
     }
 }
+
 #endif
 
 __device__ inline UC scale(UL cdf, UL cdfmin, UL imageSize)
@@ -124,7 +132,8 @@ __global__ void KERNEL_Equalize(const UC *image_in, UC *image_out, const int wid
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     const UL imageSize = width * height;
 
-    if (y < height && x < width) {
+    if (y < height && x < width)
+    {
         image_out[y * width + x] = scale(cdf[image_in[y * width + x]], *cdfmin, imageSize);
     }
 }
@@ -163,9 +172,6 @@ int main(int argc, char **argv)
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize(ceil(width / blockSize.x), ceil(height / blockSize.y));
 
-    dim3 blockSizeHist(1);
-    dim3 gridSizeHist(GRAYLEVELS);
-
     UC *d_imageIn;
     UC *d_imageOut;
     ULL *d_histogram;
@@ -197,12 +203,13 @@ int main(int argc, char **argv)
     KERNEL_CalculateHistogram<<<gridSize, blockSize>>>(d_imageIn, width, height, d_histogram);
 
     // 2. Calculate the cumulative distribution histogram.
-    KERNEL_CalculateCDF<<<gridSizeHist, blockSizeHist>>>(d_histogram, d_cdf);
+    dim3 blocks256(GRAYLEVELS);
+    dim3 gridSizeHist(1);
+    KERNEL_CalculateCDF<<<gridSizeHist, blocks256>>>(d_histogram, d_cdf);
 
-    // 3. Calculate the new gray-level values through the general histogram equalization formula and assign new pixel values
-    dim3 blockSizeMin(GRAYLEVELS);
-    dim3 gridSizeMin((GRAYLEVELS + blockSizeMin.x - 1) / blockSizeMin.x);
-    KERNEL_findMin<<<gridSizeMin, blockSizeMin>>>(d_cdf, d_cdfmin);
+    // 3. Calculate the OPTIMIZED gray-level values through the general histogram equalization formula and assign OPTIMIZED pixel values
+    dim3 gridSizeMin((GRAYLEVELS + blocks256.x - 1) / blocks256.x);
+    KERNEL_findMin<<<gridSizeMin, blocks256>>>(d_cdf, d_cdfmin);
 
     #ifdef LOGGER
         checkCudaErrors(cudaMemcpy(&max_value, d_cdfmin, ull_size, cudaMemcpyDeviceToHost));
@@ -236,8 +243,8 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaFree(d_cdfmin));
 
     // Clean up the two events
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     // Free memory
     free(imageIn);
