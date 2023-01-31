@@ -18,6 +18,7 @@
 // #define LOGGER
 #define PERF
 #define OPTIMIZED
+#define PERF_STEPS // requires PERF flag to be activated
 
 typedef unsigned long long ULL;
 typedef unsigned long UL;
@@ -70,6 +71,38 @@ __global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
 }
 
 #else
+
+//__global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
+//{
+//    // set shared memory to zeros with first thread
+//    __shared__ ULL shared[GRAYLEVELS];
+//    int i, init_thread = threadIdx.x == 0 && threadIdx.y == 0;
+//    if (init_thread) 
+//    {
+//        for (i = 0; i < GRAYLEVELS; ++i)
+//            shared[i] = 0;
+//    }
+//
+//    __syncthreads();
+//
+//    // add value to shared memory with atomic operation
+//    int x = blockIdx.x * blockDim.x + threadIdx.x;
+//    int y = blockIdx.y * blockDim.y + threadIdx.y;
+//    if (y < height && x < width) 
+//    {
+//        int hist_index = image[y * width + x];
+//        atomicAdd(shared + hist_index, 1);
+//    }
+//
+//    __syncthreads();
+//
+//    // copy values from shared to histogram
+//    if (init_thread) 
+//    {
+//        for (i = 0; i < GRAYLEVELS; ++i)
+//            atomicAdd(histogram + i, shared[i]);
+//    }
+//}
 
 __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, const int height, ULL *histogram)
 {
@@ -192,24 +225,43 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaMemcpy(d_cdfmin, &max_value, ull_size, cudaMemcpyHostToDevice));
 
     // Create CUDA events
-    cudaEvent_t start, stop;
+    cudaEvent_t start, stop, start_1, start_2, start_3, start_4, stop_1, stop_2, stop_3, stop_4;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
+    cudaEventCreate(&start_1);
+    cudaEventCreate(&stop_1);
+    cudaEventCreate(&start_2);
+    cudaEventCreate(&stop_2);
+    cudaEventCreate(&start_3);
+    cudaEventCreate(&stop_3);
+    cudaEventCreate(&start_4);
+    cudaEventCreate(&stop_4);
 
     // Histogram equalization steps:
     cudaEventRecord(start);
+    cudaEventRecord(start_1);
 
     // 1. Create the histogram for the input grayscale image.
     KERNEL_CalculateHistogram<<<gridSize, blockSize>>>(d_imageIn, width, height, d_histogram);
+
+    cudaEventRecord(stop_1);
+    cudaEventRecord(start_2);
 
     // 2. Calculate the cumulative distribution histogram.
     dim3 blocks256(GRAYLEVELS);
     dim3 gridSizeHist(1);
     KERNEL_CalculateCDF<<<gridSizeHist, blocks256>>>(d_histogram, d_cdf);
 
+    cudaEventRecord(stop_2);
+    cudaEventRecord(start_3);
+
+
     // 3. Calculate the OPTIMIZED gray-level values through the general histogram equalization formula and assign OPTIMIZED pixel values
     dim3 gridSizeMin((GRAYLEVELS + blocks256.x - 1) / blocks256.x);
     KERNEL_findMin<<<gridSizeMin, blocks256>>>(d_cdf, d_cdfmin);
+
+    cudaEventRecord(stop_3);
+    cudaEventRecord(start_4);
 
     #ifdef LOGGER
         checkCudaErrors(cudaMemcpy(&max_value, d_cdfmin, ull_size, cudaMemcpyDeviceToHost));
@@ -217,6 +269,8 @@ int main(int argc, char **argv)
     #endif
 
     KERNEL_Equalize<<<gridSize, blockSize>>>(d_imageIn, d_imageOut, width, height, d_cdf, d_cdfmin);
+
+    cudaEventRecord(stop_4);
     cudaEventRecord(stop);
 
     // Copy data CUDA -> CPU
@@ -227,8 +281,26 @@ int main(int argc, char **argv)
 
     #ifdef PERF
         float milliseconds = 0;
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        printf("%0.3f\n", milliseconds);
+
+        #ifdef PERF_STEPS
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            printf("Global: %0.3f\n", milliseconds);
+
+            cudaEventElapsedTime(&milliseconds, start_1, stop_1);
+            printf("1: %0.3f\n", milliseconds);
+
+            cudaEventElapsedTime(&milliseconds, start_2, stop_2);
+            printf("2: %0.3f\n", milliseconds);
+
+            cudaEventElapsedTime(&milliseconds, start_3, stop_3);
+            printf("3: %0.3f\n", milliseconds);
+
+            cudaEventElapsedTime(&milliseconds, start_4, stop_4);
+            printf("4: %0.3f\n", milliseconds);
+        #else
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            printf("%0.3f\n", milliseconds);
+        #endif
     #endif
 
     // Create output image:
@@ -245,6 +317,14 @@ int main(int argc, char **argv)
     // Clean up the two events
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
+    cudaEventDestroy(start_1);
+    cudaEventDestroy(stop_1);
+    cudaEventDestroy(start_2);
+    cudaEventDestroy(stop_2);
+    cudaEventDestroy(start_3);
+    cudaEventDestroy(stop_3);
+    cudaEventDestroy(start_4);
+    cudaEventDestroy(stop_4);
 
     // Free memory
     free(imageIn);
