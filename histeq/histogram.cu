@@ -18,7 +18,6 @@
 // #define LOGGER
 #define PERF
 #define OPTIMIZED
-#define PERF_STEPS // requires PERF flag to be activated
 
 typedef unsigned long long ULL;
 typedef unsigned long UL;
@@ -179,6 +178,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    const int perf_steps = argc == 4 ? strtol(argv[3], NULL, 10) : 0;
+
     // Read image from file
     int width, height, cpp;
 
@@ -282,7 +283,8 @@ int main(int argc, char **argv)
     #ifdef PERF
         float milliseconds = 0;
 
-        #ifdef PERF_STEPS
+        if (perf_steps) 
+        {
             cudaEventElapsedTime(&milliseconds, start, stop);
             printf("Global: %0.3f\n", milliseconds);
 
@@ -297,10 +299,12 @@ int main(int argc, char **argv)
 
             cudaEventElapsedTime(&milliseconds, start_4, stop_4);
             printf("4: %0.3f\n", milliseconds);
-        #else
+        }
+        else 
+        {
             cudaEventElapsedTime(&milliseconds, start, stop);
             printf("%0.3f\n", milliseconds);
-        #endif
+        }
     #endif
 
     // Create output image:
