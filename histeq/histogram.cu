@@ -43,7 +43,7 @@ __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, cons
     }
 }
 
-__global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
+__global__ void KERNEL_CalculateCDF(const ULL *histogram, ULL *cdf)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x, i;
     ULL sum = 0;
@@ -115,7 +115,7 @@ __global__ void KERNEL_CalculateHistogram(const UC *image, const int width, cons
     }
 }
 
-__global__ void KERNEL_CalculateCDF(ULL *histogram, ULL *cdf)
+__global__ void KERNEL_CalculateCDF(const ULL *histogram, ULL *cdf)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x, i;
     cdf[x] = histogram[x];
@@ -152,7 +152,7 @@ __global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
 
 #endif
 
-__device__ inline UC scale(UL cdf, UL cdfmin, UL imageSize)
+__device__ inline UC scale(const UL cdf, const UL cdfmin, const UL imageSize)
 {
     float scale = (float)(cdf - cdfmin) / (float)(imageSize - cdfmin);
     return (int)round(scale * (float)(GRAYLEVELS - 1));

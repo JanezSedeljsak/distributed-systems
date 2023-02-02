@@ -12,15 +12,15 @@ class HistEqualization:
         return [sum(list(pic.getpixel((x, y)))) // 3 for x in range(width) for y in range(height)]
 
     @staticmethod
-    def calc_commulative_vals(values, brange):
-        commulative = np.zeros((brange,), dtype='int32')
+    def calc_cumulative_vals(values, brange):
+        cumulative = np.zeros((brange,), dtype='int32')
         for val in values:
-            commulative[val] += 1
+            cumulative[val] += 1
 
         for i in range(1, brange):
-            commulative[i] += commulative[i - 1]
+            cumulative[i] += cumulative[i - 1]
 
-        return commulative
+        return cumulative
 
     @staticmethod
     def histogram(pic, name):
@@ -32,13 +32,13 @@ class HistEqualization:
         plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\results\\{name}o.jpg')
 
     @staticmethod
-    def commulative(pic, brightness_range, name):
+    def cumulative(pic, brightness_range, name):
         plt.clf()
         vals = HistEqualization.get_brightness_values(pic)
-        comm = HistEqualization.calc_commulative_vals(vals, brightness_range)
+        comm = HistEqualization.calc_cumulative_vals(vals, brightness_range)
 
         plt.scatter(np.arange(0, brightness_range), comm, s=3)
-        plt.title('Commulative')
+        plt.title('Cumulative')
         # plt.show()
         plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\results\\{name}o2.jpg')
 
@@ -57,6 +57,18 @@ class HistEqualization:
         return total / count if count > 0 else 0
 
     @staticmethod
+    def get_times(filename):
+        times = []
+        with open(filename, 'r') as f:
+            for line in f:
+                try:
+                    times.append(float(line))
+                except ValueError:
+                    pass
+
+        return times
+
+    @staticmethod
     def read_chunks(filename):
         data = []
         chunk_size = 5
@@ -71,7 +83,32 @@ class HistEqualization:
         chunks = [tuple(data[i:i+chunk_size]) for i in range(0, len(data), chunk_size)]
         return chunks
 
+    @staticmethod
+    def write_average_to_file(filename, data):
+        with open(filename, "a") as f:
+            f.write(f'\nAvg\n{round(np.average(np.array(data)), 3)}\n')
 
+    @staticmethod
+    def make_factor_tables(add_averages=True):
+        for img in ("500", "640", "800", "1000", "1024_640", "1200", "1680_1050", "1920_1080", "2560_1080", "2560_1440", "4k","4kp"):
+            cuda_file = f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\out_cpu\\{img}.txt"
+            cpu_file = f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\out\\{img}.txt"
+            cmp_file = f"C:\\Users\\janezs\\Desktop\\vpsa\\factors\\{img}.txt"
+
+            times_cuda = HistEqualization.get_times(cuda_file)
+            times_cpu = HistEqualization.get_times(cpu_file)
+            factors = []
+
+            with open(cmp_file, 'w') as f:
+                for tcpu, tcuda in zip(times_cpu, times_cuda):
+                    factor = tcpu / tcuda
+                    factors.append(factor)
+                    f.write(f'{round(factor, 3)}\n')
+
+            if add_averages:
+                HistEqualization.write_average_to_file(cmp_file, factors)
+                HistEqualization.write_average_to_file(cuda_file, times_cuda)
+                HistEqualization.write_average_to_file(cpu_file, times_cpu)
 
     @staticmethod
     def make_graphs():
@@ -81,16 +118,16 @@ class HistEqualization:
 
             # Create histogram
             HistEqualization.histogram(image, img)
-            HistEqualization.commulative(image, 256, img)
+            HistEqualization.cumulative(image, 256, img)
 
 
     @staticmethod
-    def step_analysis():
+    def make_step_analysis():
         avgs = []
-        imgs = np.array(("500", "1024_640", "1920_1080", "4k"))
+        imgs = np.array(("500", "1024_640", "1920_1080", "2560_1440", "4kp"))
 
         for img in imgs:
-            chunks = HistEqualization.read_chunks(f"C:\\Users\\janezs\\Desktop\\vpsa\\times\\chunks\\{img}.txt")
+            chunks = HistEqualization.read_chunks(f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\chunks\\{img}.txt")
             first = np.average(np.array([step[1] for step in chunks]))
             second = np.average(np.array([step[2] for step in chunks]))
             third = np.average(np.array([step[3] for step in chunks]))
@@ -100,22 +137,23 @@ class HistEqualization:
         x = np.arange(4)
         width = 0.2
 
-        plt.bar(avg[0] - 0.2, first, width, color='cyan')
-        plt.bar(avg[1], second, width, color='orange')
-        plt.bar(avg[2] + 0.2, third, width, color='green')
-        plt.bar(avg[3] + 0.4, fourth, width, color='red')
+        plt.bar(x - 0.4, avgs[0], width, color='cyan')
+        plt.bar(x - 0.2, avgs[1], width, color='orange')
+        plt.bar(x, avgs[2], width, color='green')
+        plt.bar(x + 0.2, avgs[3], width, color='red')
+        plt.bar(x + 0.4, avgs[4], width, color='teal')
         plt.legend(list(imgs))
         plt.xlabel('Steps')
         plt.ylabel('Time (milliseconds)')
         plt.xticks(x, ['Histogram', 'CDF', 'Min', 'Equalize'])
 
-        #plt.show()
+        plt.show()
         plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\results\\chunks.jpg')
 
 
 
     @staticmethod
-    def analysis():
+    def make_analysis():
         data = [
             ("500", 500 ** 2),
             ("640", 640 ** 2),
@@ -190,5 +228,5 @@ class HistEqualization:
         plt.legend()
         plt.show()
 
-HistEqualization.step_analysis()
+HistEqualization.make_factor_tables()
 
