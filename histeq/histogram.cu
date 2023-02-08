@@ -142,11 +142,10 @@ __global__ void KERNEL_findMin(const ULL *cdf, ULL *min_ptr)
         __syncthreads();
     }
 
+    __syncthreads();
     if (threadIdx.x == 0)
     {
-        ULL prev = ULONG_LONG_MAX;
-        while (*shared < prev)
-            prev = atomicCAS(min_ptr, prev, *shared);
+        *min_ptr = *shared;
     }
 }
 
@@ -258,7 +257,7 @@ int main(int argc, char **argv)
 
 
     // 3. Calculate the OPTIMIZED gray-level values through the general histogram equalization formula and assign OPTIMIZED pixel values
-    dim3 gridSizeMin((GRAYLEVELS + blocks256.x - 1) / blocks256.x);
+    dim3 gridSizeMin(1);
     KERNEL_findMin<<<gridSizeMin, blocks256>>>(d_cdf, d_cdfmin);
 
     cudaEventRecord(stop_3);
