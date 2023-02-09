@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from PIL import Image as pimg
 import numpy as np
 from math import log
+import csv
 
 class HistEqualization:
 
@@ -89,10 +90,29 @@ class HistEqualization:
             f.write(f'\nAvg\n{round(np.average(np.array(data)), 3)}\n')
 
     @staticmethod
-    def make_factor_tables(add_averages=True):
-        for img in ("500", "640", "800", "1000", "1024_640", "1200", "1680_1050", "1920_1080", "2560_1080", "2560_1440", "4k","4kp"):
-            cuda_file = f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\out_cpu\\{img}.txt"
-            cpu_file = f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\out\\{img}.txt"
+    def make_factor_tables(add_averages=True, plot=True, csv_export=True):
+        imgs = ("500", "640", "800", "1000", "1024_640", "1200", "1680_1050", "1920_1080", "2560_1080", "2560_1440", "4k","4kp")
+        avgs = []
+        matrix = []
+
+        mapper = {
+            "500": 500 ** 2,
+            "640": 640 ** 2,
+            "800": 800 ** 2,
+            "1024_640": 1024 * 640,
+            "1000": 1000 ** 2,
+            "1200": 1200 ** 2,
+            "1680_1050": 1680 * 1050,
+            "1920_1080": 1920 * 1080,
+            "2560_1080": 2560 * 1080,
+            "2560_1440": 2560 * 1440,
+            "4k": 3840 * 2160,
+            "4kp": 4056 * 3040
+        }
+
+        for img in imgs:
+            cuda_file = f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\out\\{img}.txt"
+            cpu_file = f"C:\\Users\\janezs\\Documents\\personal\\distributed-systems\\histeq\\out_cpu\\{img}.txt"
             cmp_file = f"C:\\Users\\janezs\\Desktop\\vpsa\\factors\\{img}.txt"
 
             times_cuda = HistEqualization.get_times(cuda_file)
@@ -106,9 +126,43 @@ class HistEqualization:
                     f.write(f'{round(factor, 3)}\n')
 
             if add_averages:
+                factor_avg = np.average(np.array(factors))
+                cuda_avg = np.average(np.array(times_cuda))
+                cpu_avg = np.average(np.array(times_cpu))
+                cuda_norm_avg = cuda_avg / (mapper[img] / 10_000_000)
+                cpu_norm_avg = cpu_avg / (mapper[img] / 10_000_000)
+
+                matrix.append([
+                    "%10.3f" % cpu_avg,
+                    "%10.3f" % cuda_avg,
+                    "%10.3f" % cpu_norm_avg,
+                    "%10.3f" % cuda_norm_avg,
+                    "%10.3f" % factor_avg
+                ])
+                avgs.append(factor_avg)
                 HistEqualization.write_average_to_file(cmp_file, factors)
                 HistEqualization.write_average_to_file(cuda_file, times_cuda)
                 HistEqualization.write_average_to_file(cpu_file, times_cpu)
+
+        if plot and add_averages:
+            plt.clf()
+            plt.rcParams["figure.figsize"] = (15, 7)
+            plt.plot(imgs, avgs, label='Speed-ups')
+            plt.xlabel('Images')
+            plt.ylabel('Speed-up factor')
+            plt.title('Speed-up factors')
+            plt.xticks(rotation=25)
+            plt.legend()
+            plt.show()
+
+        if csv_export:
+            header = ['CPU times', 'CUDA times', 'CPU norm', 'CUDA norm', 'Factors']
+            with open(f"C:\\Users\\janezs\\Desktop\\vpsa\\results\\matrix.csv", 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                writer.writerows(matrix)
+
+
 
     @staticmethod
     def make_graphs():
@@ -137,17 +191,17 @@ class HistEqualization:
         x = np.arange(4)
         width = 0.2
 
-        plt.bar(x - 0.4, avgs[0], width, color='cyan')
-        plt.bar(x - 0.2, avgs[1], width, color='orange')
-        plt.bar(x, avgs[2], width, color='green')
-        plt.bar(x + 0.2, avgs[3], width, color='red')
-        plt.bar(x + 0.4, avgs[4], width, color='teal')
+        plt.bar(x - 0.4, avgs[0], width)
+        plt.bar(x - 0.2, avgs[1], width)
+        plt.bar(x, avgs[2], width)
+        plt.bar(x + 0.2, avgs[3], width)
+        plt.bar(x + 0.4, avgs[4], width)
         plt.legend(list(imgs))
         plt.xlabel('Steps')
         plt.ylabel('Time (milliseconds)')
         plt.xticks(x, ['Histogram', 'CDF', 'Min', 'Equalize'])
 
-        plt.show()
+        #plt.show()
         plt.savefig(f'C:\\Users\\janezs\\Desktop\\vpsa\\results\\chunks.jpg')
 
 
